@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+
+import sys
+from pypdf import PdfReader
+
+_TAX_DOC_1099_DIV = '1099-DIV'
+_TAX_DOC_1099_B = '1099-B'
+_ACCOUNT_SERVICE_FEE_PATTERN = 'ACCOUNT SERVICE FEE'
+_FORM_1099_B_COLUMNS = ['Fund Name (1a)', 'Payer TIN', 'CUSIP #', 'Stock', 'Recipient ac #', 
+                        'Quantity sold', 'Date sold (1c)', 'Date acquired (1b)', 'Proceeds (1d)', 'Cost basis (1e)', 
+                        'Wash sale loss disallowed (1g)', 'Gain/Loss', 'Fed tax withheld', 'State tax withheld']
+
+_FORM_1099_DIV_COLUMNS = ['Fund Name', 'Payer TIN', 'Payee ac', 'Total ordinary dividends (1a)', 'Qualified dividends (1b)', 
+                          'Total capital gains distr (2a)', 'Unrecap sec 1250 gain (2b)', 'Nondividend distr (3)', 
+                          'Fed tax withheld (4)', 'Section 199A dividends (5)', 'Foreign ta paid (7)',
+                          'Exempt interest dividends (12)', 'Specified private activity bond interest dividends (13)',
+                          'State tax withheld (16)']
+_COLUMN_HEADER = {
+    _TAX_DOC_1099_B: _FORM_1099_B_COLUMNS,
+    _TAX_DOC_1099_DIV: _FORM_1099_DIV_COLUMNS
+}
+
+def processFile(theFile):
+    reader = PdfReader(theFile)
+    taxDocType = getTaxDocType(reader)
+    print(', '.join(['{}'.format(x) for x in _COLUMN_HEADER[taxDocType]]))
+    for record in getNextFundRecord(reader, taxDocType):
+        print(', '.join(['{}'.format(x) for x in record]))
+
+def getTaxDocType(reader):
+    page0Content = reader.pages[0].extract_text()
+    if _TAX_DOC_1099_DIV in page0Content:
+        return _TAX_DOC_1099_DIV
+    elif _TAX_DOC_1099_B in page0Content:
+        return _TAX_DOC_1099_B
+    else:
+        print('Unrecognized tax doc type, only know about {} and {}'.format(_TAX_DOC_1099_B, _TAX_DOC_1099_DIV))
+        exit(0)
+
+def getNextFundRecord(reader, docType):
+    if docType == _TAX_DOC_1099_DIV:
+        return getNext1099DIVFundRecord(reader)
+    elif docType == _TAX_DOC_1099_B:
+        return getNext1099BFundRecord(reader)
+    
+# Each fund has a pair of lines with data about it
+# Seek forward to next record and return it as an array
+# Hard coded for now to the ordered boxes (like Box 1a)
+def getNext1099DIVFundRecord(reader):
+    for page in reader.pages:
+        pageContent = page.extract_text()
+        lines = []
+        for line in pageContent.splitlines():
+            line = line.replace(',', '')
+            lines.append(line)
+            if isMatchDIV(line):
+                recordTokens = lines[-2].split() + line.split()
+                fundName = ' '.join(recordTokens[:-13])
+                values = [eval(x) for x in recordTokens[-11:]]
+                record = [fundName, recordTokens[-13], recordTokens[-12]] + values
+                yield record
+
+# Each fund has a pair of lines with data about it
+# Seek forward to next record and return it as an array
+# Hard coded for now to the ordered boxes (like Box 1a)
+def getNext1099BFundRecord(reader):
+    for page in reader.pages:
+        pageContent = page.extract_text()
+        lines = []
+        for line in pageContent.splitlines():
+            lines.append(line)
+            if isMatchB(line):
+                line = line.strip().replace(_ACCOUNT_SERVICE_FEE_PATTERN, '')
+                lineTokens = line.split()
+                if len(lineTokens) == 9:
+                    pass
+                elif len(lineTokens) == 8:
+                    # must be missing box 1b Date acquired
+                    lineTokens.insert(2, 'NA')
+                else:
+                    raise(Exception('Bad line, neither 8 nor 9 things: {}'.format(line)))
+                recordTokens = lines[-2].split() + lineTokens
+                fundName = ' '.join(recordTokens[:-13])
+                record = [fundName] + recordTokens[-13:]
+                yield record
+
+def isfloat(num):
+    try:
+        float(num)
+        return True
+    except ValueError:
+        return False
+
+def isMatchDIV(line):
+    tokens = line.split()
+    if len(tokens) == 11:
+        for token in tokens:
+            if not(isfloat(token)):
+                return False
+        return True
+    else:
+        return False
+
+def isMatchB(line):
+    return line.startswith(_ACCOUNT_SERVICE_FEE_PATTERN)
+
+# pdftaxscraper /Users/jananikaushik/Desktop/vanguard-1099DIV.pdf
+# pdftaxscraper /Users/jananikaushik/Desktop/vanguard-1099B.pdf   
+def main():
+    theFile = sys.argv[1]
+    print("Hello {}".format(theFile))
+    processFile(theFile)
+
+
+main()
