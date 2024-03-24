@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# Rough start just to get my own weird vanguard pdf statements streamlined
+# Could be objectified, packaged up for pip etc someday maybe just for fun
+
 import sys
 from pypdf import PdfReader
 
